@@ -392,7 +392,7 @@
 // See SETUP.md for the one time wiring guide.
 // =====================================================================
 const CONFIG = {
-  endpoint: "https://script.google.com/macros/s/AKfycbz2Hdiw6UIsTOvcwNov5lOqa8V0M3eHKZs1LD9d4ryj2pcsoBry2V6v2qPWlsWPTJ9c5Q/exec"
+  endpoint: "PASTE_YOUR_APPS_SCRIPT_WEB_APP_URL_HERE"
 };
 
 const QUESTIONS = [
@@ -565,6 +565,26 @@ const QUESTIONS = [
       "Price, access or speed",
       "I do not know yet"
     ]
+  },
+  {
+    key: "adsRun",
+    label: "Question 13",
+    title: "Have you ever run any ads on your account?",
+    type: "adsConditional",
+    followUp: {
+      key: "adsTypes",
+      title: "Which ads have you tried?",
+      helper: "Pick everything that applies. We use this to plan your paid strategy.",
+      options: [
+        "Instagram Boost (the in-app boost on a post or reel)",
+        "Meta Ads Manager (Facebook plus Instagram together)",
+        "Google Ads (Search, Display or YouTube)",
+        "WhatsApp or Click-to-WhatsApp ads",
+        "Influencer or creator paid partnerships",
+        "Other social platform ads (LinkedIn, X, Pinterest)",
+        "I have tried but I am not sure which platform"
+      ]
+    }
   }
 ];
 
@@ -595,6 +615,36 @@ QUESTIONS.forEach((q, i) => {
       <div class="input-group">
         <label>Their Instagram handle, if you have it</label>
         <input class="text-input" id="compHandle" type="text" placeholder="@theirhandle" oninput="onCompetitorInput(${i})"/>
+      </div>
+      <div class="nav">
+        <button class="btn btn-secondary" onclick="prev()">Back</button>
+        <button class="btn btn-primary" id="nextBtn-${i}" disabled onclick="next()">Continue</button>
+      </div>
+    `;
+  } else if (q.type === "adsConditional") {
+    const fu = q.followUp;
+    const fuOptionsHtml = fu.options.map(opt => `
+      <div class="option" data-value="${opt}">
+        <div class="bullet"></div>
+        <div>${opt}</div>
+      </div>
+    `).join("");
+
+    div.innerHTML = `
+      <div class="q-label">${q.label}</div>
+      <div class="q-title">${q.title}</div>
+      <div class="options" data-qkey="${q.key}" data-multi="false" data-qidx="${i}" data-ads="root">
+        <div class="option" data-value="Yes"><div class="bullet"></div><div>Yes</div></div>
+        <div class="option" data-value="No"><div class="bullet"></div><div>No</div></div>
+      </div>
+      <div class="ads-followup" id="adsFollowup-${i}" style="display:none;margin-top:22px">
+        <div class="q-title" style="font-size:19px;margin-top:0;margin-bottom:6px">${fu.title}</div>
+        <div style="color:rgba(250,241,220,0.65);font-size:14px;margin-bottom:14px">${fu.helper}</div>
+        <div class="options" data-qkey="${fu.key}" data-multi="true" data-qidx="${i}" data-ads="followup">
+          ${fuOptionsHtml}
+          <div class="option" data-value="__other__"><div class="bullet"></div><div>Other</div></div>
+        </div>
+        <input class="other-input" id="other-${i}-fu" type="text" placeholder="Type your answer here" oninput="onAdsOtherInput(${i})"/>
       </div>
       <div class="nav">
         <button class="btn btn-secondary" onclick="prev()">Back</button>
@@ -641,7 +691,10 @@ document.querySelectorAll(".options").forEach(group => {
     const multi = group.dataset.multi === "true";
     const idx = parseInt(group.dataset.qidx, 10);
     const value = opt.dataset.value;
-    const otherInput = document.getElementById("other-" + idx);
+    const adsRole = group.dataset.ads;                    // "root" | "followup" | undefined
+    const otherInput = adsRole === "followup"
+      ? document.getElementById("other-" + idx + "-fu")
+      : document.getElementById("other-" + idx);
 
     if (multi) {
       opt.classList.toggle("selected");
@@ -666,6 +719,24 @@ document.querySelectorAll(".options").forEach(group => {
         if (value !== "__other__") { otherInput.value = ""; state.others[key] = ""; }
       }
     }
+
+    // Show or hide the ads follow-up block based on Yes/No selection
+    if (adsRole === "root") {
+      const followup = document.getElementById("adsFollowup-" + idx);
+      if (followup) {
+        if (value === "Yes") {
+          followup.style.display = "block";
+        } else {
+          followup.style.display = "none";
+          state.answers.adsTypes = [];
+          state.others.adsTypes = "";
+          followup.querySelectorAll(".option").forEach(o => o.classList.remove("selected"));
+          const fuOther = document.getElementById("other-" + idx + "-fu");
+          if (fuOther) { fuOther.classList.remove("visible"); fuOther.value = ""; }
+        }
+      }
+    }
+
     refreshNext(idx);
   });
 });
@@ -674,6 +745,12 @@ function onOtherInput(idx) {
   const q = QUESTIONS[idx];
   const val = document.getElementById("other-" + idx).value.trim();
   state.others[q.key] = val;
+  refreshNext(idx);
+}
+
+function onAdsOtherInput(idx) {
+  const val = document.getElementById("other-" + idx + "-fu").value.trim();
+  state.others.adsTypes = val;
   refreshNext(idx);
 }
 
@@ -690,6 +767,18 @@ function refreshNext(idx) {
   if (!btn) return;
   if (q.type === "competitor") {
     btn.disabled = !(state.competitor.name || state.competitor.handle);
+    return;
+  }
+  if (q.type === "adsConditional") {
+    const ar = state.answers.adsRun;
+    if (!ar) { btn.disabled = true; return; }
+    if (ar === "No") { btn.disabled = false; return; }
+    // ar === "Yes" - need adsTypes filled, and if "Other" picked, need text
+    const at = state.answers.adsTypes || [];
+    const hasTypes = at.length > 0;
+    const hasOther = at.indexOf("__other__") !== -1;
+    const otherFilled = !hasOther || ((state.others.adsTypes || "").length > 0);
+    btn.disabled = !(hasTypes && otherFilled);
     return;
   }
   const ans = state.answers[q.key];
@@ -744,7 +833,9 @@ function buildSummary() {
     onCamera: "On camera",
     targetFollower: "Target follower",
     competitor: "Biggest competitor",
-    differentiation: "Differentiation"
+    differentiation: "Differentiation",
+    adsRun: "Ads run before?",
+    adsTypes: "Ad types tried"
   };
 
   const rows = [];
@@ -783,7 +874,10 @@ function submitForm(ev) {
       cleanedAnswers[k] = v === "__other__" ? (state.others[k] || "Other") : v;
     }
   });
-  QUESTIONS.forEach(q => { questionMap[q.key] = q.title; });
+  QUESTIONS.forEach(q => {
+    questionMap[q.key] = q.title;
+    if (q.followUp) { questionMap[q.followUp.key] = q.followUp.title; }
+  });
 
   const payload = {
     submittedAt: new Date().toISOString(),
